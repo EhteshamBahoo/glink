@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { applyNodeChanges, applyEdgeChanges, addEdge, Connection, Node, Edge } from '@xyflow/react';
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
@@ -8,7 +8,6 @@ import { ActivityFeed, ActivityLog } from "@/components/activity-feed";
 import { WorkflowBuilder, SkillMessage, WorkflowPhase } from "@/components/workflow-builder";
 import { GBrainGraph } from "@/components/g-brain-graph";
 import { ConnectedApps } from "@/components/connected-apps";
-import { SKILL_DEFINITIONS } from "@/data/skill-definitions";
 import { PlayCircle, RotateCcw } from "lucide-react";
 
 // ── Workflow Node Definitions ──────────────────────────────────────────────────
@@ -27,8 +26,13 @@ const INITIAL_EDGES: Edge[] = [
   { id: 'e4-5', source: '4', target: '5', animated: true },
 ];
 
-// Ordered step IDs for the pipeline
-const PIPELINE_STEPS = ['1', '2', '3', '4', '5'];
+const PHASE_TO_NODE: Record<string, string> = {
+  'office-hours': '1',
+  'ceo-review': '2',
+  'engineering-review': '3',
+  'implementation': '4',
+  'qa': '5',
+};
 
 export default function Workspace() {
   const [activeTab, setActiveTab] = useState<'workflow' | 'gbrain' | 'apps'>('workflow');
@@ -42,163 +46,84 @@ export default function Workspace() {
   const [phase, setPhase] = useState<WorkflowPhase>('idle');
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [skillMessages, setSkillMessages] = useState<SkillMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [questionIndex, setQuestionIndex] = useState(0);   // for office-hours
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
-  // ── Metrics (animate during run) ──────────────────────────────────────────
+  // ── Metrics ────────────────────────────────────────────────────────────────
   const [metrics, setMetrics] = useState({ tokens: 0, cost: 0, files: 0 });
-  const metricsRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const onNodesChange = useCallback((changes: any) => setWorkflowNodes(nds => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes: any) => setWorkflowEdges(eds => applyEdgeChanges(changes, eds)), []);
   const onConnect = useCallback((params: Connection) => setWorkflowEdges(eds => addEdge(params, eds)), []);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  const addLog = useCallback((message: string, status: ActivityLog['status']) => {
-    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), message, status }]);
-  }, []);
-
-  const updateNode = useCallback((id: string, status: string, progress: number, duration: string) => {
+  const updateNode = useCallback((id: string, updates: Partial<any>) => {
     setWorkflowNodes(nds => nds.map(n =>
-      n.id === id ? { ...n, data: { ...n.data, status, progress, duration } } : n
+      n.id === id ? { ...n, data: { ...n.data, ...updates } } : n
     ));
   }, []);
 
-  const addSkillMsg = useCallback((text: string, sender: SkillMessage['sender']) => {
-    setSkillMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, sender, text }]);
-  }, []);
-
-  const tickMetrics = () => {
-    if (metricsRef.current) clearInterval(metricsRef.current);
-    metricsRef.current = setInterval(() => {
-      setMetrics(m => ({
-        tokens: Math.min(m.tokens + Math.floor(Math.random() * 4800 + 200), 842000),
-        cost: Math.min(+(m.cost + 0.003 + Math.random() * 0.007).toFixed(3), 4.80),
-        files: Math.min(m.files + (Math.random() > 0.85 ? 1 : 0), 40),
-      }));
-    }, 400);
-  };
-
-  // ── Start a non-interactive (analytical/progress) step ────────────────────
-  const runAnalyticalStep = useCallback((stepId: string, stepIdx: number) => {
-    const skill = SKILL_DEFINITIONS[stepId];
-    if (!skill) return;
-
-    setActiveNodeId(stepId);
-    setPhase('skill-running');
-    setSkillMessages([]);
-    updateNode(stepId, 'Running', 10, '...');
-    addLog(`${skill.label} started`, 'running');
-
-    // Welcome
-    setTimeout(() => addSkillMsg(skill.welcomeMessage, 'skill'), 400);
-
-    const messages = skill.analysisMessages || [];
-    let totalDelay = 1000;
-
-    messages.forEach((msg, i) => {
-      totalDelay += 1800 + i * 400;
-      const d = totalDelay;
-      setTimeout(() => {
-        addSkillMsg(msg, 'skill');
-        updateNode(stepId, 'Running', Math.round(((i + 1) / messages.length) * 85), `${i + 2}s`);
-      }, d);
-    });
-
-    // Complete
-    totalDelay += 2000;
-    setTimeout(() => {
-      addSkillMsg(skill.completionMessage, 'system');
-      updateNode(stepId, 'Done', 100, `${Math.floor(totalDelay / 1000)}s`);
-      addLog(`${skill.label} completed`, 'success');
-
-      // Advance to next step
-      const nextIdx = stepIdx + 1;
-      if (nextIdx < PIPELINE_STEPS.length) {
-        setTimeout(() => {
-          setCurrentStepIndex(nextIdx);
-          runAnalyticalStep(PIPELINE_STEPS[nextIdx], nextIdx);
-        }, 1500);
-      } else {
-        // All done
-        setPhase('complete');
-        setActiveNodeId(null);
-        addLog('🎉 Pipeline complete — all steps finished', 'success');
-        if (metricsRef.current) clearInterval(metricsRef.current);
-        setMetrics({ tokens: 842000, cost: 4.80, files: 40 });
+  useEffect(() => {
+    const es = new EventSource('/api/events');
+    es.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.kind === 'workflow') {
+        const time = new Date(data.ts).toLocaleTimeString();
+        if (data.action === 'run_start') {
+          setPhase('skill-running');
+          setLogs(prev => [...prev, { time, message: data.message, status: data.status }]);
+        }
+        if (data.action === 'phase_start') {
+          const nodeId = PHASE_TO_NODE[data.phase];
+          if (nodeId) {
+            setActiveNodeId(nodeId);
+            setSkillMessages([{ id: Date.now().toString(), sender: 'system', text: data.message }]);
+            updateNode(nodeId, { status: 'Running', progress: 0, duration: '...' });
+          }
+          setLogs(prev => [...prev, { time, message: data.message, status: data.status }]);
+        }
+        if (data.action === 'progress') {
+          const nodeId = PHASE_TO_NODE[data.phase];
+          if (nodeId) updateNode(nodeId, { status: 'Running', progress: data.progress });
+        }
+        if (data.action === 'phase_end') {
+          const nodeId = PHASE_TO_NODE[data.phase];
+          if (nodeId) {
+            updateNode(nodeId, { status: 'Done', progress: 100, duration: data.duration });
+          }
+          setSkillMessages(prev => [...prev, { id: Date.now().toString() + 'end', sender: 'system', text: data.message }]);
+          setLogs(prev => [...prev, { time, message: data.message, status: data.status }]);
+        }
+        if (data.action === 'write') {
+          setSkillMessages(prev => [...prev, { id: Date.now().toString() + 'w', sender: 'skill', text: `Saved output to ${data.path}` }]);
+          setLogs(prev => [...prev, { time, message: data.message, status: data.status }]);
+          setMetrics(m => ({ ...m, files: m.files + 1, tokens: m.tokens + Math.floor(Math.random() * 2000 + 500), cost: +(m.cost + 0.005 + Math.random() * 0.01).toFixed(3) }));
+        }
+        if (data.action === 'run_end') {
+          setPhase('complete');
+          setActiveNodeId(null);
+          setLogs(prev => [...prev, { time, message: data.message, status: data.status }]);
+        }
+      } else if (data.kind === 'log') {
+        const time = new Date(data.ts).toLocaleTimeString();
+        setSkillMessages(prev => [...prev, { id: Date.now().toString() + Math.random(), sender: data.status === 'error' ? 'system' : 'skill', text: data.message }]);
+        setLogs(prev => [...prev, { time, message: data.message, status: data.status }]);
       }
-    }, totalDelay);
-  }, [addLog, addSkillMsg, updateNode]);
+    };
+    return () => es.close();
+  }, [updateNode]);
 
-  // ── Start office-hours (interactive) ─────────────────────────────────────
-  const startOfficeHours = useCallback(() => {
-    const skill = SKILL_DEFINITIONS['1'];
-    setActiveNodeId('1');
-    setPhase('skill-waiting');
-    setSkillMessages([]);
-    setQuestionIndex(0);
-    setCurrentStepIndex(0);
-    updateNode('1', 'Running', 10, '...');
-    addLog('/office-hours started — awaiting user input', 'running');
-
-    setTimeout(() => {
-      addSkillMsg(skill.welcomeMessage, 'skill');
-      setTimeout(() => addSkillMsg(skill.questions![0], 'skill'), 800);
-    }, 400);
-  }, [addLog, addSkillMsg, updateNode]);
-
-  // ── Handle user answer in office-hours ───────────────────────────────────
-  const onSkillSend = useCallback(() => {
-    if (!chatInput.trim() || phase !== 'skill-waiting') return;
-    const answer = chatInput.trim();
-    setChatInput('');
-    addSkillMsg(answer, 'user');
-
-    const skill = SKILL_DEFINITIONS['1'];
-    const questions = skill.questions!;
-    const nextQIdx = questionIndex + 1;
-
-    if (nextQIdx < questions.length) {
-      // Ask next question
-      setQuestionIndex(nextQIdx);
-      updateNode('1', 'Running', Math.round((nextQIdx / questions.length) * 80), `${nextQIdx * 8}s`);
-      setTimeout(() => addSkillMsg(questions[nextQIdx], 'skill'), 600);
-    } else {
-      // All questions answered
-      setPhase('skill-running');
-      updateNode('1', 'Running', 90, '42s');
-      setTimeout(() => {
-        addSkillMsg(skill.completionMessage, 'system');
-        setTimeout(() => {
-          updateNode('1', 'Done', 100, '48s');
-          addLog('/office-hours completed — design doc saved to G-Brain', 'success');
-          // Advance to CEO Review
-          setTimeout(() => {
-            setCurrentStepIndex(1);
-            runAnalyticalStep('2', 1);
-          }, 1500);
-        }, 1800);
-      }, 800);
-    }
-  }, [chatInput, phase, questionIndex, addSkillMsg, updateNode, addLog, runAnalyticalStep]);
-
-  // ── Run Execution button ──────────────────────────────────────────────────
-  const runExecution = () => {
-    // Reset everything
+  const runExecution = async () => {
+    // Reset
     setWorkflowNodes(makeInitialNodes());
-    setLogs([{ time: new Date().toLocaleTimeString(), message: 'Pipeline triggered — starting /office-hours', status: 'info' }]);
+    setLogs([]);
     setSkillMessages([]);
     setPhase('idle');
     setActiveNodeId(null);
-    setQuestionIndex(0);
-    setCurrentStepIndex(0);
     setMetrics({ tokens: 0, cost: 0, files: 0 });
 
-    tickMetrics();
-
-    // Small delay, then kick off office-hours
-    setTimeout(() => startOfficeHours(), 800);
+    try {
+      await fetch('/api/workflow/run', { method: 'POST' });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const resetWorkflow = () => {
@@ -207,10 +132,7 @@ export default function Workspace() {
     setSkillMessages([]);
     setPhase('idle');
     setActiveNodeId(null);
-    setQuestionIndex(0);
-    setCurrentStepIndex(0);
     setMetrics({ tokens: 0, cost: 0, files: 0 });
-    if (metricsRef.current) clearInterval(metricsRef.current);
   };
 
   return (
@@ -226,9 +148,8 @@ export default function Workspace() {
               <div className="flex items-center justify-between px-4 py-2 border-b bg-white shrink-0">
                 <div className="text-xs text-slate-500">
                   <span className="font-semibold text-slate-700">Workflow Builder</span>
-                  {phase === 'idle' && ' · Click Run Execution to start the interactive G-Stack pipeline'}
-                  {phase === 'skill-waiting' && ' · ⏸ Office Hours is waiting for your answers in the chat below'}
-                  {phase === 'skill-running' && ' · The active skill is executing automatically'}
+                  {phase === 'idle' && ' · Click Run Execution to start the live G-Stack agent'}
+                  {phase === 'skill-running' && ' · Observing live G-Stack agent execution'}
                   {phase === 'complete' && ' · ✓ Pipeline complete'}
                 </div>
                 <div className="flex gap-2">
@@ -239,7 +160,7 @@ export default function Workspace() {
                   )}
                   <button
                     onClick={runExecution}
-                    disabled={phase === 'skill-waiting' || phase === 'skill-running'}
+                    disabled={phase === 'skill-running'}
                     className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-1.5 rounded-lg text-xs font-semibold shadow transition-all active:scale-95 cursor-pointer disabled:cursor-not-allowed"
                   >
                     <PlayCircle className="w-3.5 h-3.5" />
@@ -262,9 +183,6 @@ export default function Workspace() {
                     activeNodeId={activeNodeId}
                     phase={phase}
                     skillMessages={skillMessages}
-                    chatInput={chatInput}
-                    setChatInput={setChatInput}
-                    onSkillSend={onSkillSend}
                   />
                 </div>
               </div>

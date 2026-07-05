@@ -11,7 +11,7 @@ import {
   getBezierPath,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Play, FileText, CheckCircle2, Clock, X, ChevronRight, Loader2, Send } from "lucide-react";
+import { Play, FileText, CheckCircle2, Clock, X, ChevronRight, Loader2 } from "lucide-react";
 import { SKILL_DEFINITIONS } from "@/data/skill-definitions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ export type SkillMessage = {
 
 export type WorkflowPhase =
   | 'idle'
-  | 'skill-waiting'   // office-hours: paused, waiting for user answer
+  | 'skill-waiting'   // no longer used since it's real
   | 'skill-running'   // analytical/progress steps: auto-playing
   | 'complete';
 
@@ -62,7 +62,7 @@ function WorkflowNode({ data, id }: { data: any; id: string }) {
         <div className="flex items-center gap-1.5">
           {data.status === 'Done' && <CheckCircle2 className="w-4 h-4 text-green-500" />}
           {data.status === 'Running' && !isActive && <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />}
-          {isActive && <div className="w-3 h-3 rounded-full bg-amber-500 animate-pulse" title="Waiting for input" />}
+          {isActive && <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" title="Executing" />}
           {(data.status === 'Waiting' || data.status === 'Pending') && !isActive && <Clock className="w-4 h-4 text-slate-400" />}
           {data.onDelete && (
             <button onClick={(e) => { e.stopPropagation(); data.onDelete(id); }} className="text-slate-300 hover:text-red-500 transition-colors ml-1">
@@ -73,13 +73,13 @@ function WorkflowNode({ data, id }: { data: any; id: string }) {
       </div>
       <div className="p-3 flex flex-col gap-2 text-xs">
         <div className="flex justify-between items-center text-slate-600">
-          <span>Status: <strong className={data.status === 'Done' ? 'text-green-600' : data.status === 'Running' ? 'text-blue-600' : isActive ? 'text-amber-600' : ''}>
-            {isActive ? '⏸ Waiting' : data.status}
+          <span>Status: <strong className={data.status === 'Done' ? 'text-green-600' : data.status === 'Running' || isActive ? 'text-blue-600' : ''}>
+            {data.status}
           </strong></span>
           <span>Duration: {data.duration}</span>
         </div>
         <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-          <div className={`h-full ${data.status === 'Done' ? 'bg-green-500' : isActive ? 'bg-amber-400' : 'bg-blue-500'} transition-all duration-1000`}
+          <div className={`h-full ${data.status === 'Done' ? 'bg-green-500' : 'bg-blue-500'} transition-all duration-1000`}
             style={{ width: `${data.progress}%` }} />
         </div>
         <div className="flex gap-2 mt-1">
@@ -109,16 +109,10 @@ function SkillChatPanel({
   activeNodeId,
   phase,
   messages,
-  chatInput,
-  setChatInput,
-  onSend,
 }: {
   activeNodeId: string | null;
   phase: WorkflowPhase;
   messages: SkillMessage[];
-  chatInput: string;
-  setChatInput: (v: string) => void;
-  onSend: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -126,20 +120,17 @@ function SkillChatPanel({
   }, [messages]);
 
   const skill = activeNodeId ? SKILL_DEFINITIONS[activeNodeId] : null;
-  const isWaiting = phase === 'skill-waiting';
 
   if (phase === 'idle') {
     return (
       <div className="h-64 border-t flex flex-col bg-white shrink-0">
         <div className="px-4 py-3 border-b bg-slate-50 flex items-center gap-2 shrink-0">
           <div className="w-2 h-2 rounded-full bg-slate-300" />
-          <span className="text-sm font-semibold text-slate-500">Workflow Assistant</span>
+          <span className="text-sm font-semibold text-slate-500">Live Agent Console</span>
           <span className="text-xs text-slate-400 ml-auto">Idle — click Run Execution to start</span>
         </div>
         <div className="flex-1 flex items-center justify-center text-slate-400 text-xs text-center p-4">
-          The chat will become the active G-Stack skill once you start the workflow.
-          <br /><br />
-          Each step owns its own chat context.
+          This console will show the real-time execution logs from the active G-Stack agent.
         </div>
       </div>
     );
@@ -151,14 +142,9 @@ function SkillChatPanel({
       <div className={`px-4 py-2.5 border-b flex items-center gap-2 shrink-0 ${skill ? skill.headerBg : 'bg-slate-700'}`}>
         <span className="text-base">{skill?.emoji || '⚙️'}</span>
         <span className="text-sm font-bold text-white">{skill?.label || 'Workflow'}</span>
-        {isWaiting && (
-          <span className="ml-auto text-[10px] font-bold bg-white/20 text-white px-2 py-0.5 rounded-full animate-pulse">
-            ⏸ WAITING FOR INPUT
-          </span>
-        )}
         {phase === 'skill-running' && (
-          <span className="ml-auto text-[10px] font-bold bg-white/20 text-white px-2 py-0.5 rounded-full">
-            ▶ RUNNING
+          <span className="ml-auto text-[10px] font-bold bg-white/20 text-white px-2 py-0.5 rounded-full flex items-center gap-1.5">
+            <Loader2 className="w-3 h-3 animate-spin" /> RUNNING
           </span>
         )}
         {phase === 'complete' && (
@@ -171,20 +157,17 @@ function SkillChatPanel({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-white/60" ref={scrollRef}>
         {messages.map((m) => (
-          <div key={m.id} className={`flex flex-col gap-0.5 ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
+          <div key={m.id} className={`flex flex-col gap-0.5 items-start`}>
             <span className={`text-[9px] font-bold uppercase tracking-wider ${
-              m.sender === 'user' ? 'text-slate-400' :
               m.sender === 'system' ? 'text-green-600' :
               skill?.accentColor || 'text-slate-600'
             }`}>
-              {m.sender === 'user' ? 'You' : m.sender === 'system' ? '✓ System' : skill?.label || 'Skill'}
+              {m.sender === 'system' ? '✓ System' : skill?.label || 'Agent'}
             </span>
             <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
-              m.sender === 'user'
-                ? 'bg-slate-800 text-white rounded-tr-sm'
-                : m.sender === 'system'
+              m.sender === 'system'
                 ? 'bg-green-50 text-green-800 border border-green-200 rounded-tl-sm'
-                : `bg-white border ${skill?.borderColor || 'border-slate-200'} text-slate-800 rounded-tl-sm shadow-sm`
+                : `bg-white border ${skill?.borderColor || 'border-slate-200'} text-slate-800 rounded-tl-sm shadow-sm font-mono text-[11px]`
             }`}>
               {m.text}
             </div>
@@ -192,28 +175,11 @@ function SkillChatPanel({
         ))}
       </div>
 
-      {/* Input */}
+      {/* Input Placeholder */}
       <div className="px-4 pb-3 pt-2 shrink-0 bg-white border-t">
-        {isWaiting ? (
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 focus-within:border-amber-400 focus-within:ring-2 focus-within:ring-amber-200 rounded-xl px-3 py-2 transition-all">
-            <input
-              type="text"
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && onSend()}
-              placeholder="Type your answer and press Enter..."
-              className="flex-1 bg-transparent text-xs text-slate-800 placeholder:text-slate-400 outline-none"
-              autoFocus
-            />
-            <button onClick={onSend} disabled={!chatInput.trim()} className="text-amber-500 hover:text-amber-600 disabled:opacity-30">
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
-        ) : (
-          <div className="text-[10px] text-center text-slate-400 py-1">
-            {phase === 'skill-running' ? 'Skill is executing automatically...' : phase === 'complete' ? '✓ All workflow steps complete.' : ''}
-          </div>
-        )}
+        <div className="text-[10px] text-center text-slate-400 py-1">
+          {phase === 'skill-running' ? 'Agent is executing automatically...' : phase === 'complete' ? '✓ All workflow steps complete.' : ''}
+        </div>
       </div>
     </div>
   );
@@ -222,8 +188,7 @@ function SkillChatPanel({
 // ── Main WorkflowBuilder ──────────────────────────────────────────────────────
 export function WorkflowBuilder({
   nodes, edges, onNodesChange, onEdgesChange, setNodes, setEdges, onConnect,
-  // Skill props
-  activeNodeId, phase, skillMessages, chatInput, setChatInput, onSkillSend,
+  activeNodeId, phase, skillMessages,
 }: any) {
 
   const deleteEdge = useCallback((edgeId: string) => {
@@ -237,7 +202,7 @@ export function WorkflowBuilder({
 
   const nodesWithMeta = nodes.map((n: any) => ({
     ...n,
-    data: { ...n.data, onDelete: deleteNode, isActiveSkill: n.id === activeNodeId && phase === 'skill-waiting' },
+    data: { ...n.data, onDelete: deleteNode, isActiveSkill: n.id === activeNodeId && phase === 'skill-running' },
   }));
 
   const edgesWithDelete = edges.map((e: any) => ({
@@ -317,9 +282,6 @@ export function WorkflowBuilder({
           activeNodeId={activeNodeId}
           phase={phase}
           messages={skillMessages}
-          chatInput={chatInput}
-          setChatInput={setChatInput}
-          onSend={onSkillSend}
         />
       </div>
     </div>
