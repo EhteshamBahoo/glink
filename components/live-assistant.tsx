@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { ScrollArea } from "./ui/scroll-area";
-import { FileText, CheckCircle2, Send, Loader2 } from "lucide-react";
+import { FileText, CheckCircle2, Send, Loader2, TerminalSquare, XCircle } from "lucide-react";
 
 export type ChatMessage = {
   id: string;
@@ -8,26 +8,39 @@ export type ChatMessage = {
   text: string | React.ReactNode;
 };
 
-export function LiveAssistant({ messages: initialMessages, recentFiles }: { messages: ChatMessage[], recentFiles: string[] }) {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+// Compact, non-bubble element for a tool_use event, distinct from a text
+// chat bubble so it's visually clear the agent is running a command.
+export function ToolUseEvent({ name, input, status }: { name: string; input: any; status: 'running' | 'done' | 'error' }) {
+  const summary = typeof input?.command === 'string' ? input.command
+    : typeof input?.file_path === 'string' ? input.file_path
+    : typeof input?.pattern === 'string' ? input.pattern
+    : JSON.stringify(input ?? {}).slice(0, 100);
 
-  // Sync external messages from the demo flow while keeping internal ones
-  useEffect(() => {
-    if (initialMessages.length === 0) {
-      setMessages([]);
-    } else {
-      setMessages(prev => {
-        // Simple way to merge or just replace if it's the demo flow updating
-        const newIds = initialMessages.map(m => m.id);
-        const existingIds = prev.map(m => m.id);
-        const added = initialMessages.filter(m => !existingIds.includes(m.id));
-        return [...prev, ...added];
-      });
-    }
-  }, [initialMessages]);
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono text-slate-600 max-w-full">
+      <TerminalSquare className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+      <span className="font-semibold text-slate-700 shrink-0">{name}</span>
+      <span className="truncate text-slate-500">{summary}</span>
+      {status === 'running' && <Loader2 className="w-3 h-3 animate-spin text-slate-400 ml-auto shrink-0" />}
+      {status === 'done' && <CheckCircle2 className="w-3 h-3 text-green-500 ml-auto shrink-0" />}
+      {status === 'error' && <XCircle className="w-3 h-3 text-red-500 ml-auto shrink-0" />}
+    </div>
+  );
+}
+
+export function LiveAssistant({
+  messages,
+  recentFiles,
+  onSend,
+  isLoading,
+}: {
+  messages: ChatMessage[];
+  recentFiles: string[];
+  onSend: (text: string) => void;
+  isLoading: boolean;
+}) {
+  const [input, setInput] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -39,38 +52,11 @@ export function LiveAssistant({ messages: initialMessages, recentFiles }: { mess
     }
   }, [messages]);
 
-  const handleSend = async () => {
+  const handleSend = () => {
     if (!input.trim() || isLoading) return;
-    
     const userMsg = input.trim();
     setInput('');
-    
-    setMessages(prev => [...prev, { id: Date.now().toString(), sender: 'User', text: userMsg }]);
-    setIsLoading(true);
-
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg })
-      });
-      
-      const data = await res.json();
-      
-      setMessages(prev => [...prev, { 
-        id: (Date.now() + 1).toString(), 
-        sender: 'Assistant', 
-        text: data.reply 
-      }]);
-    } catch (err) {
-      setMessages(prev => [...prev, { 
-        id: (Date.now() + 1).toString(), 
-        sender: 'Assistant', 
-        text: 'Error connecting to G-Brain API.' 
-      }]);
-    } finally {
-      setIsLoading(false);
-    }
+    onSend(userMsg);
   };
 
   return (

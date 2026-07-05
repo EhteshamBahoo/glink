@@ -3,7 +3,7 @@ import { ScrollArea } from "./ui/scroll-area";
 export type ActivityLog = {
   time: string;
   message: string;
-  status?: 'success' | 'running' | 'pending' | 'info';
+  status?: 'success' | 'running' | 'pending' | 'info' | 'error';
 };
 
 export function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
@@ -20,6 +20,7 @@ export function ActivityFeed({ logs }: { logs: ActivityLog[] }) {
               <span className={
                 log.status === 'success' ? 'text-[#89d185]' :
                 log.status === 'running' ? 'text-[#e2c08d]' :
+                log.status === 'error' ? 'text-[#f48771]' :
                 log.status === 'pending' ? 'text-[#cccccc]' : 'text-[#4fc1ff]'
               }>
                 {log.message}
