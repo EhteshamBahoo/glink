@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { applyNodeChanges, applyEdgeChanges, addEdge, Connection, Node, Edge } from '@xyflow/react';
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
@@ -9,7 +9,7 @@ import { WorkflowBuilder, SkillMessage, WorkflowPhase } from "@/components/workf
 import { GBrainGraph } from "@/components/g-brain-graph";
 import { ConnectedApps } from "@/components/connected-apps";
 import { SKILL_DEFINITIONS } from "@/data/skill-definitions";
-import { PlayCircle, RotateCcw } from "lucide-react";
+import { PlayCircle, RotateCcw, Bot, X, Loader2, FileText } from "lucide-react";
 
 // ── Workflow Node Definitions ──────────────────────────────────────────────────
 const makeInitialNodes = (): Node[] => [
@@ -45,6 +45,11 @@ export default function Workspace() {
   const [chatInput, setChatInput] = useState('');
   const [questionIndex, setQuestionIndex] = useState(0);   // for office-hours
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+
+  // ── Gemini Report State ────────────────────────────────────────────────────
+  const [report, setReport] = useState<string | null>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // ── Metrics (animate during run) ──────────────────────────────────────────
   const [metrics, setMetrics] = useState({ tokens: 0, cost: 0, files: 0 });
@@ -183,6 +188,35 @@ export default function Workspace() {
     }
   }, [chatInput, phase, questionIndex, addSkillMsg, updateNode, addLog, runAnalyticalStep]);
 
+  // ── Generate Gemini Report when complete ─────────────────────────────────
+  useEffect(() => {
+    if (phase === 'complete' && !report && !isGeneratingReport) {
+      // We only want to use answers provided during office-hours, which means sender === 'user'
+      const userAnswers = skillMessages.filter(m => m.sender === 'user').map(m => m.text).join('\n\n');
+      if (!userAnswers.trim()) return;
+
+      setIsGeneratingReport(true);
+      setShowReportModal(true);
+
+      const prompt = `You are the G-Stack AI Agent Engine. Based on the following answers provided by the user during the /office-hours step:\n\n"${userAnswers}"\n\nGenerate a brief (3-4 paragraphs) Executive Project Report. Use clear spacing and bullet points. Do not use Markdown headers like #. Make it sound highly professional and strategic, summarizing what the system will now build.`;
+
+      fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: prompt })
+      })
+      .then(r => r.json())
+      .then(data => {
+        setReport(data.reply);
+        setIsGeneratingReport(false);
+      })
+      .catch(() => {
+        setReport("Failed to generate report. Make sure your GEMINI_API_KEY is set in .env.local.");
+        setIsGeneratingReport(false);
+      });
+    }
+  }, [phase, report, isGeneratingReport, skillMessages]);
+
   // ── Run Execution button ──────────────────────────────────────────────────
   const runExecution = () => {
     // Reset everything
@@ -194,6 +228,9 @@ export default function Workspace() {
     setQuestionIndex(0);
     setCurrentStepIndex(0);
     setMetrics({ tokens: 0, cost: 0, files: 0 });
+    setReport(null);
+    setShowReportModal(false);
+    setIsGeneratingReport(false);
 
     tickMetrics();
 
@@ -210,6 +247,9 @@ export default function Workspace() {
     setQuestionIndex(0);
     setCurrentStepIndex(0);
     setMetrics({ tokens: 0, cost: 0, files: 0 });
+    setReport(null);
+    setShowReportModal(false);
+    setIsGeneratingReport(false);
     if (metricsRef.current) clearInterval(metricsRef.current);
   };
 
@@ -219,7 +259,7 @@ export default function Workspace() {
       <div className="flex flex-1 h-full overflow-hidden">
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-        <main className="flex-1 h-full overflow-hidden">
+        <main className="flex-1 h-full overflow-hidden relative">
           {activeTab === 'workflow' && (
             <div className="flex flex-col h-full">
               {/* Top action bar */}
@@ -232,6 +272,11 @@ export default function Workspace() {
                   {phase === 'complete' && ' · ✓ Pipeline complete'}
                 </div>
                 <div className="flex gap-2">
+                  {phase === 'complete' && report && (
+                    <button onClick={() => setShowReportModal(true)} className="flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 transition-all mr-2">
+                      <FileText className="w-3.5 h-3.5" /> View Project Report
+                    </button>
+                  )}
                   {phase !== 'idle' && (
                     <button onClick={resetWorkflow} className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 border px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-50 transition-all">
                       <RotateCcw className="w-3.5 h-3.5" /> Reset
@@ -278,6 +323,62 @@ export default function Workspace() {
 
           {activeTab === 'gbrain' && <GBrainGraph />}
           {activeTab === 'apps' && <ConnectedApps />}
+          
+          {/* Gemini Report Modal */}
+          {showReportModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-6">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="px-6 py-4 border-b bg-slate-50 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
+                      <Bot className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="font-bold text-slate-800 text-lg leading-tight">G-Stack Executive Report</h2>
+                      <p className="text-xs text-slate-500">Generated by Gemini from your /office-hours session</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowReportModal(false)} className="text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="p-6 overflow-y-auto flex-1 bg-white">
+                  {isGeneratingReport ? (
+                    <div className="flex flex-col items-center justify-center h-48 gap-4 text-slate-500">
+                      <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                      <p className="text-sm font-medium animate-pulse">Gemini is synthesizing the project report...</p>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-700 leading-relaxed space-y-4">
+                      {report?.split('\n').map((line, i) => {
+                        if (line.startsWith('* ') || line.startsWith('- ')) {
+                          return <div key={i} className="pl-4 flex gap-2"><span className="text-indigo-500">•</span> <span>{line.substring(2)}</span></div>;
+                        }
+                        if (line.trim() === '') return <br key={i} />;
+                        // Bold formatting rudimentary support
+                        const boldParts = line.split(/\*\*(.*?)\*\*/g);
+                        return (
+                          <p key={i}>
+                            {boldParts.map((part, j) => j % 2 === 1 ? <strong key={j} className="font-semibold text-slate-900">{part}</strong> : part)}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="px-6 py-4 border-t bg-slate-50 shrink-0 flex justify-end">
+                  <button 
+                    onClick={() => setShowReportModal(false)} 
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all"
+                  >
+                    Close Report
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>

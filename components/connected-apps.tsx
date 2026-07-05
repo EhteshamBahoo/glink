@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle2, AlertTriangle, RefreshCw, Plus, X, Settings, Folder,
   GitBranch, FileText,
@@ -39,7 +39,7 @@ type AutoRule = {
 };
 
 // ── Data ─────────────────────────────────────────────────────────────────────
-const SOURCES: DataSource[] = [
+const INITIAL_SOURCES: DataSource[] = [
   {
     id: "s1", name: "Local Markdown Vault", type: "folder", category: "Notes",
     status: "connected", files: 482, lastSync: "2 min ago", icon: "📁",
@@ -49,16 +49,16 @@ const SOURCES: DataSource[] = [
   },
   {
     id: "s2", name: "Obsidian Vault", type: "obsidian", category: "Notes",
-    status: "connected", files: 1247, lastSync: "5 min ago", icon: "🔮",
+    status: "disconnected", files: 1247, lastSync: "1 week ago", icon: "🔮",
     description: "~/obsidian/main — Personal notes & research",
-    health: 100,
-    settings: { autoSync: true, frequency: "2 min", summarize: true, extractEntities: true, buildGraph: true, generateTags: true, createBacklinks: true, detectCompanies: false, detectPeople: true, exclude: ".obsidian/" }
+    health: 50,
+    settings: { autoSync: false, frequency: "2 min", summarize: true, extractEntities: true, buildGraph: true, generateTags: true, createBacklinks: true, detectCompanies: false, detectPeople: true, exclude: ".obsidian/" }
   },
   {
     id: "s3", name: "Notion", type: "notion", category: "Notes",
-    status: "connected", files: 312, lastSync: "15 min ago", icon: "📝",
+    status: "warning", files: 312, lastSync: "15 min ago", icon: "📝",
     description: "Workspace — Team wikis & roadmaps",
-    health: 96,
+    health: 70,
     settings: { autoSync: true, frequency: "15 min", summarize: true, extractEntities: true, buildGraph: false, generateTags: true, createBacklinks: false, detectCompanies: true, detectPeople: true, exclude: "" }
   },
   {
@@ -68,95 +68,28 @@ const SOURCES: DataSource[] = [
     health: 100,
     settings: { autoSync: true, frequency: "10 min", summarize: true, extractEntities: false, buildGraph: false, generateTags: true, createBacklinks: false, detectCompanies: false, detectPeople: false, exclude: "node_modules/, .next/" }
   },
-  {
-    id: "s5", name: "Gmail", type: "email", category: "Communication",
-    status: "warning", files: 3420, lastSync: "1 hr ago", icon: "📧",
-    description: "founder@glink.com — OAuth expires in 2 days",
-    health: 72,
-    settings: { autoSync: true, frequency: "30 min", summarize: true, extractEntities: true, buildGraph: true, generateTags: true, createBacklinks: true, detectCompanies: true, detectPeople: true, exclude: "promotions/, spam/" }
-  },
-  {
-    id: "s6", name: "Google Calendar", type: "calendar", category: "Communication",
-    status: "connected", files: 847, lastSync: "30 min ago", icon: "📅",
-    description: "Meeting transcripts + event context",
-    health: 94,
-    settings: { autoSync: true, frequency: "30 min", summarize: true, extractEntities: true, buildGraph: true, generateTags: false, createBacklinks: true, detectCompanies: true, detectPeople: true, exclude: "personal calendar" }
-  },
-  {
-    id: "s7", name: "Claude Code", type: "claude", category: "AI Runtime",
-    status: "connected", files: 0, lastSync: "Live", icon: "🤖",
-    description: "MCP Server — Real-time agent memory sync",
-    health: 100,
-    settings: { autoSync: true, frequency: "real-time", summarize: false, extractEntities: false, buildGraph: true, generateTags: false, createBacklinks: false, detectCompanies: false, detectPeople: false, exclude: "" }
-  },
-  {
-    id: "s8", name: "Cursor", type: "cursor", category: "AI Runtime",
-    status: "connected", files: 0, lastSync: "Live", icon: "⚡",
-    description: "MCP Integration — Context injection on demand",
-    health: 100,
-    settings: { autoSync: true, frequency: "real-time", summarize: false, extractEntities: false, buildGraph: true, generateTags: false, createBacklinks: false, detectCompanies: false, detectPeople: false, exclude: "" }
-  },
-  {
-    id: "s9", name: "OpenClaw", type: "openclaw", category: "AI Runtime",
-    status: "connected", files: 0, lastSync: "Live", icon: "🦞",
-    description: "Always-running agent runtime — persistent memory",
-    health: 100,
-    settings: { autoSync: true, frequency: "real-time", summarize: false, extractEntities: false, buildGraph: true, generateTags: false, createBacklinks: false, detectCompanies: false, detectPeople: false, exclude: "" }
-  },
-  {
-    id: "s10", name: "Twitter / X", type: "twitter", category: "Web",
-    status: "connected", files: 2341, lastSync: "1 hr ago", icon: "𝕏",
-    description: "Tracked accounts + saved threads",
-    health: 88,
-    settings: { autoSync: true, frequency: "1 hour", summarize: true, extractEntities: true, buildGraph: true, generateTags: true, createBacklinks: false, detectCompanies: true, detectPeople: true, exclude: "" }
-  },
-  {
-    id: "s11", name: "Slack", type: "slack", category: "Communication",
-    status: "syncing", files: 0, lastSync: "Syncing...", icon: "💬",
-    description: "Enterprise Grid — Metadata only (content excluded)",
-    health: 85,
-    settings: { autoSync: true, frequency: "5 min", summarize: false, extractEntities: false, buildGraph: false, generateTags: false, createBacklinks: false, detectCompanies: false, detectPeople: false, exclude: "DMs, personal channels" }
-  },
-  {
-    id: "s12", name: "Meeting Transcripts", type: "transcripts", category: "Communication",
-    status: "connected", files: 183, lastSync: "3 hr ago", icon: "🎙️",
-    description: "Otter.ai + Zoom recordings — auto-imported",
-    health: 91,
-    settings: { autoSync: true, frequency: "manual", summarize: true, extractEntities: true, buildGraph: true, generateTags: true, createBacklinks: true, detectCompanies: true, detectPeople: true, exclude: "" }
-  },
 ];
 
 const SYNC_JOBS: SyncJob[] = [
   { id: "j1", source: "Obsidian Vault", status: "completed", progress: 100, files: 41, time: "10:32" },
   { id: "j2", source: "Gmail", status: "syncing", progress: 62, files: 18, time: "10:31" },
   { id: "j3", source: "GitHub", status: "completed", progress: 100, files: 7, time: "10:28" },
-  { id: "j4", source: "Google Calendar", status: "completed", progress: 100, files: 23, time: "10:26" },
-  { id: "j5", source: "Twitter/X", status: "waiting", progress: 0, files: 0, time: "10:24" },
-  { id: "j6", source: "Markdown Vault", status: "completed", progress: 100, files: 482, time: "10:20" },
-  { id: "j7", source: "Meeting Transcripts", status: "completed", progress: 100, files: 6, time: "10:15" },
-  { id: "j8", source: "Notion", status: "completed", progress: 100, files: 14, time: "10:08" },
 ];
 
 const AUTOMATION_RULES: AutoRule[] = [
   { trigger: "Email arrives from known contact", actions: ["Summarize thread", "Create markdown", "Link to person.md", "Update company.md", "Refresh graph"] },
   { trigger: "GitHub PR merged", actions: ["Read diff & README", "Update project.md", "Tag relevant entities", "Notify agent context"] },
-  { trigger: "Meeting transcript uploaded", actions: ["Transcribe audio", "Extract action items", "Link attendees", "Create meeting.md", "Update G-Brain"] },
-  { trigger: "Dream Cycle (nightly 2am)", actions: ["Find duplicate entities", "Merge overlapping stubs", "Repair broken links", "Update all summaries", "Rebuild search index"] },
 ];
 
 const WATCHED_FOLDERS = [
   { path: "~/Documents/Brain", freq: "2 min", exclude: ".obsidian, archive/" },
   { path: "~/Projects", freq: "5 min", exclude: "node_modules/, .git/" },
-  { path: "~/Notes", freq: "2 min", exclude: "images/, attachments/" },
-  { path: "~/Research", freq: "10 min", exclude: "" },
 ];
 
 const SOURCE_OPTIONS = [
   { icon: "📁", label: "Folder / Vault" }, { icon: "🐙", label: "Git Repository" },
   { icon: "📝", label: "Notes App" }, { icon: "📧", label: "Email" },
   { icon: "🌐", label: "Browser / Bookmarks" }, { icon: "📅", label: "Calendar" },
-  { icon: "🎙️", label: "Meeting Recorder" }, { icon: "🤖", label: "MCP Client" },
-  { icon: "⚡", label: "API Endpoint" }, { icon: "🔗", label: "Custom Webhook" },
 ];
 
 const CATEGORIES = ["All", "Notes", "Development", "Communication", "AI Runtime", "Web"];
@@ -169,7 +102,7 @@ function StatusBadge({ status }: { status: SourceStatus }) {
     warning: "bg-amber-100 text-amber-700 border-amber-200",
     disconnected: "bg-slate-100 text-slate-500 border-slate-200",
   };
-  const labels = { connected: "Connected", syncing: "Syncing", warning: "Warning", disconnected: "Off" };
+  const labels = { connected: "Connected", syncing: "Syncing", warning: "Warning", disconnected: "Disconnected" };
   return (
     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${map[status]}`}>
       {status === "connected" && <CheckCircle2 className="w-3 h-3" />}
@@ -214,14 +147,12 @@ function SyncProgressBar({ job }: { job: SyncJob }) {
 }
 
 // ── Settings Drawer ───────────────────────────────────────────────────────────
-function SourceSettingsDrawer({ source, onClose }: { source: DataSource; onClose: () => void }) {
+function SourceSettingsDrawer({ source, onClose, onSync }: { source: DataSource; onClose: () => void; onSync: (id: string) => void }) {
   const [settings, setSettings] = useState(source.settings);
-  const boolKeys = ["summarize", "extractEntities", "buildGraph", "generateTags", "createBacklinks", "autoSync", "detectCompanies", "detectPeople"];
+  const boolKeys = ["summarize", "extractEntities", "buildGraph", "autoSync"];
   const labels: Record<string, string> = {
     summarize: "Summarize content", extractEntities: "Extract entities",
-    buildGraph: "Build knowledge graph", generateTags: "Generate tags",
-    createBacklinks: "Create backlinks", autoSync: "Auto sync",
-    detectCompanies: "Detect companies", detectPeople: "Detect people",
+    buildGraph: "Build knowledge graph", autoSync: "Auto sync",
   };
 
   return (
@@ -267,34 +198,13 @@ function SourceSettingsDrawer({ source, onClose }: { source: DataSource; onClose
             </div>
           </div>
 
-          {/* Exclude paths */}
-          <div>
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Exclude Paths</div>
-            <textarea
-              className="w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm text-slate-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-              rows={3}
-              value={settings.exclude as string}
-              onChange={e => setSettings(s => ({ ...s, exclude: e.target.value }))}
-            />
-          </div>
-
-          {/* Graph Preview */}
-          <div>
-            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Processing Pipeline</div>
-            <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
-              {["Ingest", "Parse", "Summarize", "Extract Entities", "Build Graph", "Index"].map((step, i, arr) => (
-                <span key={step} className="flex items-center gap-1">
-                  <span className="bg-slate-100 border rounded px-2 py-1">{step}</span>
-                  {i < arr.length - 1 && <ChevronRight className="w-3 h-3 text-slate-400" />}
-                </span>
-              ))}
-            </div>
-          </div>
-
           {/* Actions */}
           <div className="flex gap-3 pt-2">
-            <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg flex items-center justify-center gap-2">
-              <RefreshCw className="w-4 h-4" /> Sync Now
+            <button
+              onClick={() => { onSync(source.id); onClose(); }}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg flex items-center justify-center gap-2 transition-all active:scale-95"
+            >
+              <RefreshCw className={`w-4 h-4 ${source.status === 'syncing' ? 'animate-spin' : ''}`} /> {source.status === 'syncing' ? 'Syncing...' : 'Sync Now'}
             </button>
             <button className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-lg border border-red-200">
               Disconnect
@@ -362,14 +272,31 @@ export function ConnectedApps() {
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedSource, setSelectedSource] = useState<DataSource | null>(null);
+  const [sources, setSources] = useState<DataSource[]>(INITIAL_SOURCES);
+  const [currentTime, setCurrentTime] = useState("");
+
+  useEffect(() => {
+    setCurrentTime(new Date().toLocaleTimeString());
+    const int = setInterval(() => setCurrentTime(new Date().toLocaleTimeString()), 60000);
+    return () => clearInterval(int);
+  }, []);
+
+  const handleSync = (id: string) => {
+    setSources(prev => prev.map(s => s.id === id ? { ...s, status: 'syncing' } : s));
+    
+    // Simulate sync
+    setTimeout(() => {
+      setSources(prev => prev.map(s => s.id === id ? { ...s, status: 'connected', health: 100, lastSync: 'Just now', files: s.files + Math.floor(Math.random() * 20) + 1 } : s));
+    }, 2500);
+  };
 
   const filteredSources = categoryFilter === "All"
-    ? SOURCES
-    : SOURCES.filter(s => s.category === categoryFilter);
+    ? sources
+    : sources.filter(s => s.category === categoryFilter);
 
   const stats = {
-    sources: SOURCES.length,
-    files: SOURCES.reduce((a, s) => a + s.files, 0).toLocaleString(),
+    sources: sources.length,
+    files: sources.reduce((a, s) => a + s.files, 0).toLocaleString(),
     entities: "31,492",
     relationships: "89,122",
     syncJobs: 83,
@@ -448,7 +375,7 @@ export function ConnectedApps() {
               {filteredSources.map(source => (
                 <div
                   key={source.id}
-                  className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col gap-4 shadow-sm hover:shadow-md hover:border-slate-300 transition-all"
+                  className={`bg-white rounded-2xl border p-5 flex flex-col gap-4 shadow-sm hover:shadow-md transition-all ${source.status === 'syncing' ? 'border-blue-300 ring-1 ring-blue-300' : 'border-slate-200 hover:border-slate-300'}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-3">
@@ -490,8 +417,16 @@ export function ConnectedApps() {
                     >
                       <Settings className="w-3.5 h-3.5" /> Configure
                     </button>
-                    <button className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-semibold border border-blue-200 transition-colors">
-                      <RefreshCw className="w-3.5 h-3.5" /> Sync Now
+                    <button 
+                      onClick={() => handleSync(source.id)}
+                      disabled={source.status === 'syncing'}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold border transition-colors active:scale-95 ${
+                        source.status === 'syncing' 
+                          ? 'bg-blue-100 text-blue-700 border-blue-200 opacity-50 cursor-not-allowed' 
+                          : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'
+                      }`}
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${source.status === 'syncing' ? 'animate-spin' : ''}`} /> {source.status === 'syncing' ? 'Syncing...' : 'Sync Now'}
                     </button>
                   </div>
                 </div>
@@ -520,34 +455,10 @@ export function ConnectedApps() {
             <div className="bg-white rounded-2xl border p-6 shadow-sm">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="font-bold text-slate-800">Current Sync Jobs</h2>
-                <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{new Date().toLocaleTimeString()}</span>
+                {currentTime && <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{currentTime}</span>}
               </div>
               <div className="space-y-3">
                 {SYNC_JOBS.map(job => <SyncProgressBar key={job.id} job={job} />)}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border p-6 shadow-sm">
-              <h2 className="font-bold text-slate-800 mb-4">Sync History</h2>
-              <div className="space-y-3">
-                {[
-                  { time: "10:32", msg: "Imported 41 markdown files from Obsidian", type: "success" },
-                  { time: "10:31", msg: "Indexed 7 PDFs from meeting transcripts", type: "success" },
-                  { time: "10:28", msg: "Updated 18 GitHub README files", type: "success" },
-                  { time: "10:26", msg: "Extracted 142 entities from Calendar events", type: "success" },
-                  { time: "10:24", msg: "Dream Cycle completed — 23 entities merged", type: "info" },
-                  { time: "10:18", msg: "OAuth token refreshed for Gmail", type: "info" },
-                  { time: "09:45", msg: "Warning: Gmail OAuth token expires in 2 days", type: "warning" },
-                  { time: "09:30", msg: "Slack Enterprise Grid sync initialized", type: "success" },
-                ].map((item, i) => (
-                  <div key={i} className="flex items-start gap-3 py-2 border-b last:border-0">
-                    <span className="text-[10px] text-slate-400 font-mono w-10 shrink-0 mt-0.5">{item.time}</span>
-                    <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
-                      item.type === "success" ? "bg-green-500" : item.type === "warning" ? "bg-amber-500" : "bg-blue-500"
-                    }`} />
-                    <span className="text-xs text-slate-600">{item.msg}</span>
-                  </div>
-                ))}
               </div>
             </div>
           </div>
@@ -580,38 +491,19 @@ export function ConnectedApps() {
                 ))}
               </div>
             </div>
-
-            <div className="bg-white rounded-2xl border p-6 shadow-sm">
-              <h2 className="font-bold text-slate-800 mb-4">Import Wizard</h2>
-              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center gap-3 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer group">
-                <div className="w-14 h-14 bg-slate-100 group-hover:bg-blue-100 rounded-2xl flex items-center justify-center transition-colors">
-                  <FileText className="w-7 h-7 text-slate-400 group-hover:text-blue-500" />
-                </div>
-                <div className="text-center">
-                  <div className="font-semibold text-slate-700">Drop files to import</div>
-                  <div className="text-xs text-slate-500 mt-1">Markdown · PDF · TXT · CSV · JSON · ZIP · Git Repo</div>
-                </div>
-                <button className="mt-2 px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700">
-                  Browse Files
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
         {/* ── PROCESSING RULES ── */}
         {subTab === "rules" && (
           <div className="max-w-2xl space-y-4">
-            {SOURCES.slice(0, 5).map(source => {
-              const boolSettings = ["summarize", "extractEntities", "buildGraph", "generateTags", "createBacklinks", "detectCompanies", "detectPeople"] as const;
+            {sources.slice(0, 5).map(source => {
+              const boolSettings = ["summarize", "extractEntities", "buildGraph", "autoSync"] as const;
               const labels: Record<string, string> = {
                 summarize: "Summarize content",
                 extractEntities: "Extract entities",
                 buildGraph: "Build knowledge graph",
-                generateTags: "Generate tags",
-                createBacklinks: "Create backlinks",
-                detectCompanies: "Detect companies",
-                detectPeople: "Detect people",
+                autoSync: "Auto Sync",
               };
               return (
                 <div key={source.id} className="bg-white rounded-2xl border p-5 shadow-sm">
@@ -667,10 +559,6 @@ export function ConnectedApps() {
                 </div>
               </div>
             ))}
-
-            <button className="w-full py-4 bg-white rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-400 hover:bg-blue-50 text-slate-500 hover:text-blue-600 font-semibold text-sm flex items-center justify-center gap-2 transition-all">
-              <Plus className="w-4 h-4" /> Add Automation Rule
-            </button>
           </div>
         )}
       </div>
@@ -695,7 +583,7 @@ export function ConnectedApps() {
 
       {/* Modals / Drawers */}
       {showAddModal && <AddSourceModal onClose={() => setShowAddModal(false)} />}
-      {selectedSource && <SourceSettingsDrawer source={selectedSource} onClose={() => setSelectedSource(null)} />}
+      {selectedSource && <SourceSettingsDrawer source={selectedSource} onClose={() => setSelectedSource(null)} onSync={handleSync} />}
     </div>
   );
 }
