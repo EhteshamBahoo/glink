@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   CheckCircle2, AlertTriangle, RefreshCw, Plus, X, Settings, Folder,
   GitBranch, FileText,
@@ -362,27 +362,16 @@ export function ConnectedApps() {
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedSource, setSelectedSource] = useState<DataSource | null>(null);
-  const [liveStats, setLiveStats] = useState({ files: 0, entities: 0, relationships: 0, sources: 0 });
-
-  useEffect(() => {
-    fetch('/api/brain/stats')
-      .then(r => r.json())
-      .then(d => {
-        if (d.status === 'healthy') {
-          setLiveStats({ files: d.files, entities: d.entities, relationships: d.relationships, sources: d.sources });
-        }
-      });
-  }, []);
 
   const filteredSources = categoryFilter === "All"
     ? SOURCES
     : SOURCES.filter(s => s.category === categoryFilter);
 
   const stats = {
-    sources: liveStats.sources || SOURCES.length,
-    files: (liveStats.files || SOURCES.reduce((a, s) => a + s.files, 0)).toLocaleString(),
-    entities: liveStats.entities ? liveStats.entities.toLocaleString() : "31,492",
-    relationships: liveStats.relationships ? liveStats.relationships.toLocaleString() : "89,122",
+    sources: SOURCES.length,
+    files: SOURCES.reduce((a, s) => a + s.files, 0).toLocaleString(),
+    entities: "31,492",
+    relationships: "89,122",
     syncJobs: 83,
     storage: "2.4 GB",
   };
