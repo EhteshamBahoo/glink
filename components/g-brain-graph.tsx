@@ -1,123 +1,455 @@
-import { useState } from "react";
-import { Database, GitCommit, FileText } from "lucide-react";
+"use client";
 
-export function GBrainGraph() {
-  const [activeNode, setActiveNode] = useState<any>(null);
+import { useState, useCallback, useMemo } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  Handle,
+  Position,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  Panel,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { BRAIN_FILES, getFilesByTier, BrainFile } from "@/data/brain-files";
+import { X, FileText, Loader2, ChevronRight } from "lucide-react";
 
-  const nodes = [
-    { id: 1, label: 'Garry Tan', tier: 1, type: 'person', x: '50%', y: '50%', color: 'bg-yellow-400', glow: true, summary: 'President & CEO of Y Combinator. Key contact. Active research: Recent tweets about San Francisco tech.' },
-    { id: 2, label: 'Paul Graham', tier: 1, type: 'person', x: '58%', y: '42%', color: 'bg-yellow-400', glow: true, summary: 'Founder of Y Combinator. Frequent mentions in startup strategy docs.' },
-    { id: 3, label: 'Stripe', tier: 2, type: 'company', x: '30%', y: '60%', color: 'bg-blue-400', summary: 'Major payment processor. Mentioned in pricing.md.' },
-    { id: 4, label: 'Vercel', tier: 2, type: 'company', x: '65%', y: '70%', color: 'bg-blue-400', summary: 'Hosting provider for Next.js. Mentioned in architecture.md.' },
-    { id: 5, label: 'Alex (Coffee)', tier: 3, type: 'stub', x: '15%', y: '20%', color: 'bg-slate-400', summary: 'Minor mention: Met at coffee shop yesterday. No deep enrichment. Kept as stub.' },
-    { id: 6, label: 'TechCrunch', tier: 3, type: 'stub', x: '80%', y: '85%', color: 'bg-slate-400', summary: 'News source mention in random Slack export.' },
-    { id: 7, label: 'OpenAI', tier: 2, type: 'company', x: '70%', y: '30%', color: 'bg-blue-400', summary: 'AI API provider. Mentioned 4 times in tech specs. Research workflow executed.' },
+// ── Tier color palette ──────────────────────────────────────────────────────
+const TIER_COLORS = {
+  1: { bg: "#f59e0b", border: "#d97706", glow: "rgba(245,158,11,0.4)", text: "#78350f", label: "Core Strategy" },
+  2: { bg: "#6366f1", border: "#4f46e5", glow: "rgba(99,102,241,0.35)", text: "#312e81", label: "Team & Dept" },
+  3: { bg: "#22c55e", border: "#16a34a", glow: "rgba(34,197,94,0.3)", text: "#14532d", label: "Operational" },
+};
+
+// ── Custom Node ──────────────────────────────────────────────────────────────
+function FileNode({ data }: { data: any }) {
+  const colors = TIER_COLORS[data.tier as keyof typeof TIER_COLORS];
+  return (
+    <div
+      onClick={() => data.onClick(data.file)}
+      style={{
+        background: "#ffffff",
+        border: `2px solid ${colors.border}`,
+        boxShadow: `0 0 12px ${colors.glow}, 0 2px 8px rgba(0,0,0,0.08)`,
+        borderRadius: 10,
+        padding: "6px 10px",
+        cursor: "pointer",
+        minWidth: 130,
+        maxWidth: 160,
+        transition: "all 0.15s",
+      }}
+      className="hover:scale-105"
+    >
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: colors.bg,
+            boxShadow: `0 0 6px ${colors.glow}`,
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ fontSize: 11, fontWeight: 600, color: "#1e293b", lineHeight: 1.3 }}>
+          {data.label}
+        </span>
+      </div>
+      <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2, marginLeft: 14 }}>
+        {data.category}
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+    </div>
+  );
+}
+
+// ── Tier Hub Node ────────────────────────────────────────────────────────────
+function TierNode({ data }: { data: any }) {
+  const colors = TIER_COLORS[data.tier as keyof typeof TIER_COLORS];
+  return (
+    <div
+      onClick={() => data.onClick(data.tier)}
+      style={{
+        background: colors.bg,
+        border: `3px solid ${colors.border}`,
+        boxShadow: `0 0 24px ${colors.glow}, 0 4px 16px rgba(0,0,0,0.15)`,
+        borderRadius: 16,
+        padding: "10px 18px",
+        cursor: "pointer",
+        minWidth: 160,
+        textAlign: "center",
+        transition: "all 0.15s",
+      }}
+      className="hover:scale-105"
+    >
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+      <div style={{ fontSize: 10, fontWeight: 700, color: colors.text, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        Tier {data.tier}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 800, color: colors.text, marginTop: 2 }}>
+        {colors.label}
+      </div>
+      <div style={{ fontSize: 10, color: colors.text, opacity: 0.7, marginTop: 1 }}>
+        {data.count} files · click to summarize
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+    </div>
+  );
+}
+
+const nodeTypes = { fileNode: FileNode, tierNode: TierNode };
+
+// ── Layout: concentric rings around a center ─────────────────────────────────
+function buildGraph(onFileClick: (f: BrainFile) => void, onTierClick: (t: number) => void) {
+  const nodes: any[] = [];
+  const edges: any[] = [];
+
+  // Center project node
+  nodes.push({
+    id: "center",
+    type: "default",
+    position: { x: 0, y: 0 },
+    data: { label: "AI Employee\nProgress Tracking" },
+    style: {
+      background: "#0f172a",
+      color: "#f8fafc",
+      border: "3px solid #334155",
+      borderRadius: 20,
+      padding: "12px 20px",
+      fontWeight: 800,
+      fontSize: 13,
+      boxShadow: "0 0 40px rgba(15,23,42,0.4)",
+      textAlign: "center",
+      width: 170,
+      whiteSpace: "pre-line",
+    },
+  });
+
+  const TIER_POSITIONS = [
+    { radius: 280, yOffset: -20 },  // Tier 1
+    { radius: 520, yOffset: 0 },    // Tier 2
+    { radius: 760, yOffset: 0 },    // Tier 3
   ];
 
+  [1, 2, 3].forEach((tier) => {
+    const files = getFilesByTier(tier as 1 | 2 | 3);
+    const { radius, yOffset } = TIER_POSITIONS[tier - 1];
+    const angleStep = (2 * Math.PI) / files.length;
+
+    // Tier hub
+    const hubId = `tier-${tier}`;
+    const hubAngle = -Math.PI / 2; // top
+    nodes.push({
+      id: hubId,
+      type: "tierNode",
+      position: { x: radius * Math.cos(hubAngle), y: radius * Math.sin(hubAngle) + yOffset },
+      data: { tier, count: files.length, onClick: onTierClick },
+    });
+
+    edges.push({
+      id: `center-${hubId}`,
+      source: "center",
+      target: hubId,
+      style: { stroke: TIER_COLORS[tier as keyof typeof TIER_COLORS].border, strokeWidth: 2, opacity: 0.6 },
+      animated: tier === 1,
+    });
+
+    files.forEach((file, i) => {
+      const angle = angleStep * i - Math.PI / 2;
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle) + yOffset;
+
+      nodes.push({
+        id: file.id,
+        type: "fileNode",
+        position: { x, y },
+        data: {
+          label: file.name.replace(".md", ""),
+          category: file.category,
+          tier: file.tier,
+          file,
+          onClick: onFileClick,
+        },
+      });
+
+      edges.push({
+        id: `hub-${file.id}`,
+        source: hubId,
+        target: file.id,
+        style: {
+          stroke: TIER_COLORS[tier as keyof typeof TIER_COLORS].bg,
+          strokeWidth: 1.5,
+          opacity: 0.5,
+        },
+      });
+    });
+  });
+
+  return { nodes, edges };
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+export function GBrainGraph() {
+  const [selectedFile, setSelectedFile] = useState<BrainFile | null>(null);
+  const [selectedTier, setSelectedTier] = useState<number | null>(null);
+  const [summary, setSummary] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<{ sender: string; text: string }[]>([
+    { sender: "Assistant", text: "Click any node or tier in the G-Brain graph to get an AI-generated summary. You can also ask me questions about the knowledge base." }
+  ]);
+  const [chatLoading, setChatLoading] = useState(false);
+
+  const handleFileClick = useCallback(async (file: BrainFile) => {
+    setSelectedFile(file);
+    setSelectedTier(null);
+    setSummary("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "file_summary", file }),
+      });
+      const data = await res.json();
+      setSummary(data.summary || "Unable to generate summary.");
+    } catch {
+      setSummary("Error generating summary. Check API connection.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleTierClick = useCallback(async (tier: number) => {
+    setSelectedTier(tier);
+    setSelectedFile(null);
+    setSummary("");
+    setLoading(true);
+    const tierFiles = getFilesByTier(tier as 1 | 2 | 3);
+    try {
+      const res = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "tier_summary", tier, tierFiles }),
+      });
+      const data = await res.json();
+      setSummary(data.summary || "Unable to generate summary.");
+    } catch {
+      setSummary("Error generating summary.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+    () => buildGraph(handleFileClick, handleTierClick),
+    [handleFileClick, handleTierClick]
+  );
+
+  const [nodes, , onNodesChange] = useNodesState(initialNodes);
+  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+
+  const handleChatSend = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const msg = chatInput.trim();
+    setChatInput("");
+    setChatMessages(prev => [...prev, { sender: "User", text: msg }]);
+    setChatLoading(true);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg }),
+      });
+      const data = await res.json();
+      setChatMessages(prev => [...prev, { sender: "Assistant", text: data.reply }]);
+    } catch {
+      setChatMessages(prev => [...prev, { sender: "Assistant", text: "Error connecting to G-Brain API." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const tierColors = TIER_COLORS;
+
   return (
-    <div className="w-full h-full bg-[#111] text-slate-200 flex flex-col p-6 overflow-hidden font-sans">
-      <div className="flex justify-between items-end mb-6 shrink-0">
-        <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">G-Brain Explorer</h2>
-          <p className="text-sm text-slate-400 mt-1">Enrichment Tiers & Storage routing</p>
-        </div>
+    <div className="flex h-full w-full bg-[#0a0f1e] overflow-hidden">
+      {/* Graph Canvas */}
+      <div className="flex-1 h-full relative">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          fitView
+          fitViewOptions={{ padding: 0.15 }}
+          style={{ background: "#0a0f1e" }}
+          minZoom={0.1}
+          maxZoom={2}
+        >
+          <Background color="#1e293b" gap={32} size={1} />
+          <Controls style={{ background: "#1e293b", border: "1px solid #334155" }} />
+          <MiniMap
+            style={{ background: "#1e293b", border: "1px solid #334155" }}
+            nodeColor={(n) => {
+              if (n.type === "fileNode") return tierColors[n.data?.tier as keyof typeof tierColors]?.bg || "#6b7280";
+              if (n.type === "tierNode") return tierColors[n.data?.tier as keyof typeof tierColors]?.bg || "#6b7280";
+              return "#0f172a";
+            }}
+          />
+          <Panel position="top-left">
+            <div className="bg-[#1e293b]/90 border border-[#334155] rounded-xl p-4 backdrop-blur-sm">
+              <div className="text-white font-bold text-sm mb-3">G-Brain Knowledge Graph</div>
+              <div className="text-slate-400 text-xs mb-3">AI Employee Progress Tracking — {BRAIN_FILES.length} documents</div>
+              <div className="space-y-2">
+                {([1, 2, 3] as const).map(t => (
+                  <div key={t} className="flex items-center gap-2 cursor-pointer" onClick={() => handleTierClick(t)}>
+                    <div className="w-3 h-3 rounded-full" style={{ background: tierColors[t].bg, boxShadow: `0 0 6px ${tierColors[t].glow}` }} />
+                    <span className="text-xs text-slate-300">Tier {t}: {tierColors[t].label}</span>
+                    <span className="text-xs text-slate-500">({getFilesByTier(t).length})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Panel>
+        </ReactFlow>
       </div>
 
-      <div className="flex-1 flex gap-6 h-full min-h-0">
-        
-        {/* Enrichment Radar */}
-        <div className="flex-1 bg-[#1a1a1a] border border-[#333] rounded-2xl p-6 flex flex-col relative overflow-hidden shadow-xl">
-          <h3 className="font-semibold text-slate-300 mb-4 z-10 text-sm uppercase tracking-wider">Enrichment Radar</h3>
-          
-          <div className="absolute inset-0 m-auto w-[400px] h-[400px] flex items-center justify-center">
-            {/* Tiers Background */}
-            <div className="absolute w-[400px] h-[400px] rounded-full border border-[#444] border-dashed" title="Tier 3" />
-            <div className="absolute w-[250px] h-[250px] rounded-full border border-[#555] border-dashed bg-[#222]/30" title="Tier 2" />
-            <div className="absolute w-[100px] h-[100px] rounded-full border border-[#777] bg-[#333]/50 shadow-[0_0_30px_rgba(255,255,255,0.05)]" title="Tier 1" />
-
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-[10px] text-slate-500 font-bold">TIER 3 (STUBS)</div>
-            <div className="absolute top-[80px] left-1/2 -translate-x-1/2 text-[10px] text-slate-400 font-bold">TIER 2 (NOTABLE)</div>
-            <div className="absolute top-[165px] left-1/2 -translate-x-1/2 text-[10px] text-slate-300 font-bold">TIER 1 (CORE)</div>
-
-            {/* Nodes */}
-            {nodes.map(node => (
-              <div 
-                key={node.id}
-                className={`absolute w-3.5 h-3.5 rounded-full cursor-pointer transition-all hover:scale-150 ${node.color} ${node.glow ? 'shadow-[0_0_15px_rgba(250,204,21,0.6)] ring-2 ring-yellow-400/50' : ''}`}
-                style={{ left: node.x, top: node.y, transform: 'translate(-50%, -50%)' }}
-                onClick={() => setActiveNode(node)}
-                title={node.label}
-              >
-                <span className="absolute top-5 left-1/2 -translate-x-1/2 text-[10px] font-bold text-slate-300 whitespace-nowrap bg-black/80 px-2 py-0.5 rounded opacity-0 hover:opacity-100 transition-opacity">
-                  {node.label}
-                </span>
+      {/* Right Panel: Summary + Chat */}
+      <div className="w-96 h-full flex flex-col border-l border-[#1e293b] bg-[#0d1424]">
+        {/* Summary Panel */}
+        <div className="flex-1 overflow-y-auto p-5 border-b border-[#1e293b]">
+          {!selectedFile && !selectedTier && (
+            <div className="flex flex-col items-center justify-center h-full text-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-[#1e293b] flex items-center justify-center">
+                <FileText className="w-8 h-8 text-slate-500" />
               </div>
-            ))}
-          </div>
-
-          {/* Node Info Popover */}
-          {activeNode && (
-            <div className="absolute bottom-6 left-6 right-6 bg-[#252525] border border-[#444] rounded-xl p-4 shadow-xl z-20 animate-in slide-in-from-bottom-2">
-              <div className="flex justify-between items-start mb-2">
-                <h4 className="font-bold text-white flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${activeNode.color}`} />
-                  {activeNode.label}
-                </h4>
-                <span className="text-xs font-mono font-bold text-slate-300 bg-[#111] px-2 py-1 rounded border border-[#333]">Tier {activeNode.tier}</span>
+              <div>
+                <div className="text-slate-300 font-semibold text-sm">Select a node to explore</div>
+                <div className="text-slate-500 text-xs mt-1">Click any file or tier hub to get an AI-generated summary</div>
               </div>
-              <p className="text-sm text-slate-300 leading-relaxed">{activeNode.summary}</p>
+            </div>
+          )}
+
+          {selectedFile && (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: tierColors[selectedFile.tier].bg }} />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tier {selectedFile.tier} · {selectedFile.category}</span>
+                  </div>
+                  <div className="font-bold text-white text-base">{selectedFile.name}</div>
+                </div>
+                <button onClick={() => { setSelectedFile(null); setSummary(""); }} className="text-slate-500 hover:text-white p-1 mt-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Generating summary...
+                </div>
+              ) : summary ? (
+                <div className="bg-[#1e293b] rounded-xl p-4 border border-[#334155]">
+                  <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2">AI Summary</div>
+                  <p className="text-slate-300 text-sm leading-relaxed">{summary}</p>
+                </div>
+              ) : null}
+
+              <div className="bg-[#1e293b] rounded-xl p-4 border border-[#334155]">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Raw Content</div>
+                <pre className="text-slate-400 text-xs leading-relaxed whitespace-pre-wrap font-mono overflow-y-auto max-h-60">
+                  {selectedFile.content}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {selectedTier && !selectedFile && (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: tierColors[selectedTier as keyof typeof tierColors].bg }} />
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tier {selectedTier} Overview</span>
+                  </div>
+                  <div className="font-bold text-white text-base">{tierColors[selectedTier as keyof typeof tierColors].label}</div>
+                  <div className="text-slate-500 text-xs mt-0.5">{getFilesByTier(selectedTier as 1 | 2 | 3).length} documents</div>
+                </div>
+                <button onClick={() => { setSelectedTier(null); setSummary(""); }} className="text-slate-500 hover:text-white p-1 mt-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {loading ? (
+                <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Analyzing {getFilesByTier(selectedTier as 1 | 2 | 3).length} files...
+                </div>
+              ) : summary ? (
+                <div className="bg-[#1e293b] rounded-xl p-4 border border-[#334155]">
+                  <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2">AI Tier Summary</div>
+                  <p className="text-slate-300 text-sm leading-relaxed">{summary}</p>
+                </div>
+              ) : null}
+
+              <div className="space-y-1">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Files in this tier</div>
+                {getFilesByTier(selectedTier as 1 | 2 | 3).map(f => (
+                  <div
+                    key={f.id}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#1e293b] cursor-pointer group"
+                    onClick={() => handleFileClick(f)}
+                  >
+                    <FileText className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300" />
+                    <span className="text-slate-400 text-xs group-hover:text-slate-200 flex-1">{f.name}</span>
+                    <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-slate-400" />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Storage Splitter */}
-        <div className="w-80 bg-[#1a1a1a] border border-[#333] rounded-2xl p-6 flex flex-col relative shadow-xl">
-          <h3 className="font-semibold text-slate-300 mb-8 text-sm uppercase tracking-wider">Storage Splitter</h3>
-          
-          <div className="flex flex-col items-center flex-1 justify-center gap-12 relative">
-            
-            {/* Input Stream */}
-            <div className="w-full flex justify-center relative">
-              <div className="w-16 h-16 bg-[#2a2a2a] rounded-xl border border-[#555] flex flex-col items-center justify-center z-10 shadow-lg relative">
-                <FileText className="w-6 h-6 text-slate-200 mb-1" />
-                <span className="text-[9px] text-slate-400 font-bold">INCOMING</span>
-                <div className="absolute -bottom-8 w-0.5 h-8 bg-gradient-to-b from-[#555] to-transparent" />
+        {/* Chat Panel */}
+        <div className="h-72 flex flex-col bg-[#0a0f1e]">
+          <div className="px-4 py-3 border-b border-[#1e293b] shrink-0">
+            <div className="text-slate-200 font-semibold text-sm">G-Brain Assistant</div>
+            <div className="text-slate-500 text-xs">Ask about any document or knowledge pattern</div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+            {chatMessages.map((m, i) => (
+              <div key={i}>
+                <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${m.sender === "User" ? "text-indigo-400" : "text-amber-400"}`}>{m.sender}</div>
+                <div className="text-slate-300 text-xs leading-relaxed whitespace-pre-wrap">{m.text}</div>
               </div>
+            ))}
+            {chatLoading && (
+              <div className="flex items-center gap-2 text-slate-500 text-xs">
+                <Loader2 className="w-3 h-3 animate-spin" /> Thinking...
+              </div>
+            )}
+          </div>
+          <div className="px-4 pb-4 shrink-0">
+            <div className="flex items-center gap-2 bg-[#1e293b] border border-[#334155] rounded-lg px-3 py-2 focus-within:border-indigo-500 transition-colors">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleChatSend()}
+                placeholder="Ask about G-Brain..."
+                className="flex-1 bg-transparent text-xs text-slate-200 placeholder:text-slate-600 outline-none"
+              />
+              <button onClick={handleChatSend} disabled={!chatInput.trim() || chatLoading} className="text-indigo-400 hover:text-indigo-300 disabled:opacity-30">
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
-
-            {/* Split Router */}
-            <div className="w-full flex justify-between items-center relative mt-4">
-              {/* Connector lines */}
-              <div className="absolute -top-10 left-12 right-12 h-10 border-b border-l border-r border-[#444] rounded-b-xl -z-10" />
-
-              {/* Git Vault */}
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-16 h-16 bg-[#2a2a2a] rounded-full border-2 border-green-500/50 flex items-center justify-center shadow-[0_0_20px_rgba(34,197,94,0.15)] relative overflow-hidden group">
-                  <div className="absolute inset-0 bg-green-500/10 group-hover:bg-green-500/20 transition-colors" />
-                  <GitCommit className="w-6 h-6 text-green-400" />
-                </div>
-                <div className="text-center">
-                  <div className="text-xs font-bold text-white mb-0.5">db_tracked</div>
-                  <div className="text-[10px] text-slate-400">Git Vault (Core .md)</div>
-                </div>
-              </div>
-
-              {/* DB Silo */}
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-16 h-16 bg-[#2a2a2a] rounded-full border-2 border-blue-500/50 flex items-center justify-center shadow-[0_0_20px_rgba(59,130,246,0.15)] relative overflow-hidden group">
-                  <div className="absolute inset-0 bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors" />
-                  <Database className="w-6 h-6 text-blue-400" />
-                </div>
-                <div className="text-center">
-                  <div className="text-xs font-bold text-white mb-0.5">db_only</div>
-                  <div className="text-[10px] text-slate-400">DB Silo (Bulk JSON)</div>
-                </div>
-              </div>
-            </div>
-
           </div>
         </div>
-
       </div>
     </div>
   );
