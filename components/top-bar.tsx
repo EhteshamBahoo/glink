@@ -1,28 +1,43 @@
 import { Coins, FileText, Activity, Bot } from "lucide-react";
+import { WorkflowPhase } from "@/components/workflow-builder";
 
-export function TopBar() {
+export function TopBar({ metrics, phase }: { metrics?: { tokens: number; cost: number; files: number }; phase?: WorkflowPhase }) {
+  const tokens = metrics?.tokens ?? 0;
+  const cost = metrics?.cost ?? 0;
+  const files = metrics?.files ?? 0;
+
+  const workflowLabel = phase === 'skill-waiting' ? '⏸ Waiting'
+    : phase === 'skill-running' ? 'Running'
+    : phase === 'complete' ? '✓ Done'
+    : 'Idle';
+
+  const workflowColor = phase === 'skill-waiting' ? 'text-amber-600'
+    : phase === 'skill-running' ? 'text-blue-600'
+    : phase === 'complete' ? 'text-green-600'
+    : 'text-slate-400';
+
   return (
     <div className="h-12 border-b bg-white flex items-center px-4 justify-between shrink-0">
       <div className="flex items-center gap-2">
-        <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+        <div className={`w-3 h-3 rounded-full ${phase === 'skill-running' || phase === 'skill-waiting' ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
         <span className="font-semibold text-sm tracking-tight text-slate-800">G Link Workspace</span>
       </div>
       <div className="flex items-center gap-6 text-xs text-slate-600">
         <div className="flex items-center gap-1.5">
           <Coins className="w-3.5 h-3.5 text-slate-400" />
-          <span>Tokens: <strong className="text-slate-800">842K</strong></span>
+          <span>Tokens: <strong className="text-slate-800 tabular-nums">{tokens >= 1000 ? `${(tokens / 1000).toFixed(0)}K` : tokens}</strong></span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-slate-400">$</span>
-          <span>Cost: <strong className="text-slate-800">$1.27</strong></span>
+          <span>Cost: <strong className="text-slate-800 tabular-nums">${cost.toFixed(2)}</strong></span>
         </div>
         <div className="flex items-center gap-1.5">
           <FileText className="w-3.5 h-3.5 text-slate-400" />
-          <span>Markdown Files: <strong className="text-slate-800">18</strong></span>
+          <span>MD Files: <strong className="text-slate-800 tabular-nums">{files}</strong></span>
         </div>
         <div className="flex items-center gap-1.5">
           <Activity className="w-3.5 h-3.5 text-slate-400" />
-          <span>Workflow: <strong className="text-green-600">Running</strong></span>
+          <span>Workflow: <strong className={workflowColor}>{workflowLabel}</strong></span>
         </div>
         <div className="flex items-center gap-1.5">
           <Bot className="w-3.5 h-3.5 text-slate-400" />

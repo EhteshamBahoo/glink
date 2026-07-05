@@ -1,81 +1,256 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { applyNodeChanges, applyEdgeChanges, addEdge, Connection, Node, Edge } from '@xyflow/react';
 import { Sidebar } from "@/components/sidebar";
 import { TopBar } from "@/components/top-bar";
 import { ActivityFeed, ActivityLog } from "@/components/activity-feed";
-import { WorkflowBuilder } from "@/components/workflow-builder";
+import { WorkflowBuilder, SkillMessage, WorkflowPhase } from "@/components/workflow-builder";
 import { GBrainGraph } from "@/components/g-brain-graph";
 import { ConnectedApps } from "@/components/connected-apps";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { PlayCircle } from "lucide-react";
+import { SKILL_DEFINITIONS } from "@/data/skill-definitions";
+import { PlayCircle, RotateCcw } from "lucide-react";
 
-const initialWorkflowNodes: Node[] = [
-  { id: '1', type: 'workflowNode', position: { x: 250, y: 50 }, data: { label: '/office-hours', status: 'Pending', duration: '--', progress: 0 } },
-  { id: '2', type: 'workflowNode', position: { x: 250, y: 220 }, data: { label: 'CEO Review', status: 'Pending', duration: '--', progress: 0 } },
-  { id: '3', type: 'workflowNode', position: { x: 250, y: 390 }, data: { label: 'Engineering Review', status: 'Pending', duration: '--', progress: 0 } },
-  { id: '4', type: 'workflowNode', position: { x: 250, y: 560 }, data: { label: 'Implementation', status: 'Pending', duration: '--', progress: 0 } },
-  { id: '5', type: 'workflowNode', position: { x: 250, y: 730 }, data: { label: 'QA', status: 'Pending', duration: '--', progress: 0 } },
+// ── Workflow Node Definitions ──────────────────────────────────────────────────
+const makeInitialNodes = (): Node[] => [
+  { id: '1', type: 'workflowNode', position: { x: 250, y: 30  }, data: { label: '/office-hours',     status: 'Pending', duration: '--', progress: 0 } },
+  { id: '2', type: 'workflowNode', position: { x: 250, y: 200 }, data: { label: '/plan-ceo-review',  status: 'Pending', duration: '--', progress: 0 } },
+  { id: '3', type: 'workflowNode', position: { x: 250, y: 370 }, data: { label: '/plan-eng-review',  status: 'Pending', duration: '--', progress: 0 } },
+  { id: '4', type: 'workflowNode', position: { x: 250, y: 540 }, data: { label: 'Implementation',    status: 'Pending', duration: '--', progress: 0 } },
+  { id: '5', type: 'workflowNode', position: { x: 250, y: 710 }, data: { label: '/qa',               status: 'Pending', duration: '--', progress: 0 } },
 ];
 
-const initialWorkflowEdges: Edge[] = [
+const INITIAL_EDGES: Edge[] = [
   { id: 'e1-2', source: '1', target: '2', animated: true },
   { id: 'e2-3', source: '2', target: '3', animated: true },
   { id: 'e3-4', source: '3', target: '4', animated: true },
   { id: 'e4-5', source: '4', target: '5', animated: true },
 ];
 
+// Ordered step IDs for the pipeline
+const PIPELINE_STEPS = ['1', '2', '3', '4', '5'];
+
 export default function Workspace() {
   const [activeTab, setActiveTab] = useState<'workflow' | 'gbrain' | 'apps'>('workflow');
-  
-  const [workflowNodes, setWorkflowNodes] = useState<Node[]>(initialWorkflowNodes);
-  const [workflowEdges, setWorkflowEdges] = useState<Edge[]>(initialWorkflowEdges);
+
+  // ── Workflow canvas state ──────────────────────────────────────────────────
+  const [workflowNodes, setWorkflowNodes] = useState<Node[]>(makeInitialNodes());
+  const [workflowEdges, setWorkflowEdges] = useState<Edge[]>(INITIAL_EDGES);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
-  
-  const onNodesChange = useCallback((changes: any) => setWorkflowNodes((nds) => applyNodeChanges(changes, nds)), []);
-  const onEdgesChange = useCallback((changes: any) => setWorkflowEdges((eds) => applyEdgeChanges(changes, eds)), []);
-  const onConnect = useCallback((params: Connection) => setWorkflowEdges((eds) => addEdge(params, eds)), []);
 
-  const runDemo = () => {
-    setWorkflowNodes(initialWorkflowNodes.map(n => ({ ...n, data: { ...n.data, status: 'Pending', progress: 0, duration: '--' } })));
-    setLogs([{ time: new Date().toLocaleTimeString(), message: 'Triggered pipeline execution', status: 'info' }]);
+  // ── Skill / Chat state ─────────────────────────────────────────────────────
+  const [phase, setPhase] = useState<WorkflowPhase>('idle');
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const [skillMessages, setSkillMessages] = useState<SkillMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [questionIndex, setQuestionIndex] = useState(0);   // for office-hours
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
-    const updateNode = (id: string, status: string, progress: number, duration: string) => {
-      setWorkflowNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, status, progress, duration } } : n));
-    };
-    const addLog = (message: string, status: any) => {
-      setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), message, status }]);
-    };
+  // ── Metrics (animate during run) ──────────────────────────────────────────
+  const [metrics, setMetrics] = useState({ tokens: 0, cost: 0, files: 0 });
+  const metricsRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    setTimeout(() => { updateNode('1', 'Running', 50, '12s'); addLog('/office-hours started...', 'running'); }, 1000);
-    setTimeout(() => { updateNode('1', 'Done', 100, '32s'); updateNode('2', 'Running', 20, '4s'); addLog('/office-hours completed', 'success'); addLog('CEO Review started', 'running'); }, 4000);
-    setTimeout(() => { updateNode('2', 'Done', 100, '45s'); updateNode('3', 'Running', 10, '2s'); addLog('CEO Review completed', 'success'); addLog('Engineering Review started', 'running'); }, 8000);
-    setTimeout(() => { updateNode('3', 'Done', 100, '1m 12s'); updateNode('4', 'Running', 60, '45s'); addLog('Engineering Review completed', 'success'); addLog('Implementation started', 'running'); }, 12000);
-    setTimeout(() => { updateNode('4', 'Done', 100, '3m 44s'); updateNode('5', 'Running', 80, '28s'); addLog('Implementation completed', 'success'); addLog('QA started', 'running'); }, 17000);
-    setTimeout(() => { updateNode('5', 'Done', 100, '55s'); addLog('QA passed ✅ Pipeline complete', 'success'); }, 21000);
+  const onNodesChange = useCallback((changes: any) => setWorkflowNodes(nds => applyNodeChanges(changes, nds)), []);
+  const onEdgesChange = useCallback((changes: any) => setWorkflowEdges(eds => applyEdgeChanges(changes, eds)), []);
+  const onConnect = useCallback((params: Connection) => setWorkflowEdges(eds => addEdge(params, eds)), []);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const addLog = useCallback((message: string, status: ActivityLog['status']) => {
+    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), message, status }]);
+  }, []);
+
+  const updateNode = useCallback((id: string, status: string, progress: number, duration: string) => {
+    setWorkflowNodes(nds => nds.map(n =>
+      n.id === id ? { ...n, data: { ...n.data, status, progress, duration } } : n
+    ));
+  }, []);
+
+  const addSkillMsg = useCallback((text: string, sender: SkillMessage['sender']) => {
+    setSkillMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, sender, text }]);
+  }, []);
+
+  const tickMetrics = () => {
+    if (metricsRef.current) clearInterval(metricsRef.current);
+    metricsRef.current = setInterval(() => {
+      setMetrics(m => ({
+        tokens: Math.min(m.tokens + Math.floor(Math.random() * 4800 + 200), 842000),
+        cost: Math.min(+(m.cost + 0.003 + Math.random() * 0.007).toFixed(3), 4.80),
+        files: Math.min(m.files + (Math.random() > 0.85 ? 1 : 0), 40),
+      }));
+    }, 400);
+  };
+
+  // ── Start a non-interactive (analytical/progress) step ────────────────────
+  const runAnalyticalStep = useCallback((stepId: string, stepIdx: number) => {
+    const skill = SKILL_DEFINITIONS[stepId];
+    if (!skill) return;
+
+    setActiveNodeId(stepId);
+    setPhase('skill-running');
+    setSkillMessages([]);
+    updateNode(stepId, 'Running', 10, '...');
+    addLog(`${skill.label} started`, 'running');
+
+    // Welcome
+    setTimeout(() => addSkillMsg(skill.welcomeMessage, 'skill'), 400);
+
+    const messages = skill.analysisMessages || [];
+    let totalDelay = 1000;
+
+    messages.forEach((msg, i) => {
+      totalDelay += 1800 + i * 400;
+      const d = totalDelay;
+      setTimeout(() => {
+        addSkillMsg(msg, 'skill');
+        updateNode(stepId, 'Running', Math.round(((i + 1) / messages.length) * 85), `${i + 2}s`);
+      }, d);
+    });
+
+    // Complete
+    totalDelay += 2000;
+    setTimeout(() => {
+      addSkillMsg(skill.completionMessage, 'system');
+      updateNode(stepId, 'Done', 100, `${Math.floor(totalDelay / 1000)}s`);
+      addLog(`${skill.label} completed`, 'success');
+
+      // Advance to next step
+      const nextIdx = stepIdx + 1;
+      if (nextIdx < PIPELINE_STEPS.length) {
+        setTimeout(() => {
+          setCurrentStepIndex(nextIdx);
+          runAnalyticalStep(PIPELINE_STEPS[nextIdx], nextIdx);
+        }, 1500);
+      } else {
+        // All done
+        setPhase('complete');
+        setActiveNodeId(null);
+        addLog('🎉 Pipeline complete — all steps finished', 'success');
+        if (metricsRef.current) clearInterval(metricsRef.current);
+        setMetrics({ tokens: 842000, cost: 4.80, files: 40 });
+      }
+    }, totalDelay);
+  }, [addLog, addSkillMsg, updateNode]);
+
+  // ── Start office-hours (interactive) ─────────────────────────────────────
+  const startOfficeHours = useCallback(() => {
+    const skill = SKILL_DEFINITIONS['1'];
+    setActiveNodeId('1');
+    setPhase('skill-waiting');
+    setSkillMessages([]);
+    setQuestionIndex(0);
+    setCurrentStepIndex(0);
+    updateNode('1', 'Running', 10, '...');
+    addLog('/office-hours started — awaiting user input', 'running');
+
+    setTimeout(() => {
+      addSkillMsg(skill.welcomeMessage, 'skill');
+      setTimeout(() => addSkillMsg(skill.questions![0], 'skill'), 800);
+    }, 400);
+  }, [addLog, addSkillMsg, updateNode]);
+
+  // ── Handle user answer in office-hours ───────────────────────────────────
+  const onSkillSend = useCallback(() => {
+    if (!chatInput.trim() || phase !== 'skill-waiting') return;
+    const answer = chatInput.trim();
+    setChatInput('');
+    addSkillMsg(answer, 'user');
+
+    const skill = SKILL_DEFINITIONS['1'];
+    const questions = skill.questions!;
+    const nextQIdx = questionIndex + 1;
+
+    if (nextQIdx < questions.length) {
+      // Ask next question
+      setQuestionIndex(nextQIdx);
+      updateNode('1', 'Running', Math.round((nextQIdx / questions.length) * 80), `${nextQIdx * 8}s`);
+      setTimeout(() => addSkillMsg(questions[nextQIdx], 'skill'), 600);
+    } else {
+      // All questions answered
+      setPhase('skill-running');
+      updateNode('1', 'Running', 90, '42s');
+      setTimeout(() => {
+        addSkillMsg(skill.completionMessage, 'system');
+        setTimeout(() => {
+          updateNode('1', 'Done', 100, '48s');
+          addLog('/office-hours completed — design doc saved to G-Brain', 'success');
+          // Advance to CEO Review
+          setTimeout(() => {
+            setCurrentStepIndex(1);
+            runAnalyticalStep('2', 1);
+          }, 1500);
+        }, 1800);
+      }, 800);
+    }
+  }, [chatInput, phase, questionIndex, addSkillMsg, updateNode, addLog, runAnalyticalStep]);
+
+  // ── Run Execution button ──────────────────────────────────────────────────
+  const runExecution = () => {
+    // Reset everything
+    setWorkflowNodes(makeInitialNodes());
+    setLogs([{ time: new Date().toLocaleTimeString(), message: 'Pipeline triggered — starting /office-hours', status: 'info' }]);
+    setSkillMessages([]);
+    setPhase('idle');
+    setActiveNodeId(null);
+    setQuestionIndex(0);
+    setCurrentStepIndex(0);
+    setMetrics({ tokens: 0, cost: 0, files: 0 });
+
+    tickMetrics();
+
+    // Small delay, then kick off office-hours
+    setTimeout(() => startOfficeHours(), 800);
+  };
+
+  const resetWorkflow = () => {
+    setWorkflowNodes(makeInitialNodes());
+    setLogs([]);
+    setSkillMessages([]);
+    setPhase('idle');
+    setActiveNodeId(null);
+    setQuestionIndex(0);
+    setCurrentStepIndex(0);
+    setMetrics({ tokens: 0, cost: 0, files: 0 });
+    if (metricsRef.current) clearInterval(metricsRef.current);
   };
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-50 overflow-hidden font-sans text-slate-900">
-      <TopBar />
+      <TopBar metrics={metrics} phase={phase} />
       <div className="flex flex-1 h-full overflow-hidden">
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-        
+
         <main className="flex-1 h-full overflow-hidden">
           {activeTab === 'workflow' && (
             <div className="flex flex-col h-full">
               {/* Top action bar */}
               <div className="flex items-center justify-between px-4 py-2 border-b bg-white shrink-0">
                 <div className="text-xs text-slate-500">
-                  <span className="font-semibold text-slate-700">Workflow Builder</span> · Drag steps from the palette · Connect nodes by dragging from <span className="font-mono">●</span> to <span className="font-mono">●</span> · Delete with <span className="font-mono">×</span> or Backspace
+                  <span className="font-semibold text-slate-700">Workflow Builder</span>
+                  {phase === 'idle' && ' · Click Run Execution to start the interactive G-Stack pipeline'}
+                  {phase === 'skill-waiting' && ' · ⏸ Office Hours is waiting for your answers in the chat below'}
+                  {phase === 'skill-running' && ' · The active skill is executing automatically'}
+                  {phase === 'complete' && ' · ✓ Pipeline complete'}
                 </div>
-                <button onClick={runDemo} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-xs font-semibold shadow transition-all active:scale-95 cursor-pointer">
-                  <PlayCircle className="w-3.5 h-3.5" /> Run Execution
-                </button>
+                <div className="flex gap-2">
+                  {phase !== 'idle' && (
+                    <button onClick={resetWorkflow} className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 border px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-50 transition-all">
+                      <RotateCcw className="w-3.5 h-3.5" /> Reset
+                    </button>
+                  )}
+                  <button
+                    onClick={runExecution}
+                    disabled={phase === 'skill-waiting' || phase === 'skill-running'}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-1.5 rounded-lg text-xs font-semibold shadow transition-all active:scale-95 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <PlayCircle className="w-3.5 h-3.5" />
+                    {phase === 'complete' ? 'Run Again' : 'Run Execution'}
+                  </button>
+                </div>
               </div>
-              <ResizablePanelGroup orientation="vertical" className="flex-1">
-                <ResizablePanel defaultSize={65} minSize={40}>
+
+              {/* Canvas + Skill Chat split */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 overflow-hidden">
                   <WorkflowBuilder
                     nodes={workflowNodes}
                     edges={workflowEdges}
@@ -84,18 +259,24 @@ export default function Workspace() {
                     setNodes={setWorkflowNodes}
                     setEdges={setWorkflowEdges}
                     onConnect={onConnect}
+                    activeNodeId={activeNodeId}
+                    phase={phase}
+                    skillMessages={skillMessages}
+                    chatInput={chatInput}
+                    setChatInput={setChatInput}
+                    onSkillSend={onSkillSend}
                   />
-                </ResizablePanel>
-                <ResizableHandle withHandle />
-                <ResizablePanel defaultSize={35} minSize={15}>
-                  <ActivityFeed logs={logs} />
-                </ResizablePanel>
-              </ResizablePanelGroup>
+                </div>
+              </div>
+
+              {/* Activity Feed */}
+              <div className="h-36 border-t shrink-0">
+                <ActivityFeed logs={logs} />
+              </div>
             </div>
           )}
 
           {activeTab === 'gbrain' && <GBrainGraph />}
-          
           {activeTab === 'apps' && <ConnectedApps />}
         </main>
       </div>
