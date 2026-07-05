@@ -7,31 +7,44 @@ import {
   Position,
   useReactFlow
 } from '@xyflow/react';
-import { Play, FileText, CheckCircle2, Clock } from 'lucide-react';
+import { Play, FileText, CheckCircle2, Clock, XCircle } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 
 // Custom Node Component
 function WorkflowNode({ data }: { data: any }) {
   return (
-    <div className={`w-64 rounded-xl border bg-white shadow-sm overflow-hidden ${data.status === 'Running' ? 'border-blue-400 ring-1 ring-blue-400' : 'border-slate-200'}`}>
+    <div className={`w-64 rounded-xl border bg-white shadow-sm overflow-hidden ${
+      data.status === 'Running' ? 'border-blue-400 ring-1 ring-blue-400' :
+      data.status === 'Error' ? 'border-red-400 ring-1 ring-red-400' :
+      'border-slate-200'
+    }`}>
       <Handle type="target" position={Position.Top} className="w-2 h-2 bg-slate-300" />
       <div className="p-3 border-b bg-slate-50 flex items-center justify-between">
         <span className="font-semibold text-sm text-slate-800">{data.label}</span>
         {data.status === 'Done' && <CheckCircle2 className="w-4 h-4 text-green-500" />}
         {data.status === 'Running' && <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />}
-        {data.status === 'Waiting' && <Clock className="w-4 h-4 text-slate-400" />}
+        {data.status === 'Pending' && <Clock className="w-4 h-4 text-slate-400" />}
+        {data.status === 'Error' && <XCircle className="w-4 h-4 text-red-500" />}
       </div>
       <div className="p-3 flex flex-col gap-2 text-xs">
         <div className="flex justify-between items-center text-slate-600">
-          <span>Status: <strong className={data.status === 'Done' ? 'text-green-600' : data.status === 'Running' ? 'text-blue-600' : ''}>{data.status}</strong></span>
+          <span>Status: <strong className={
+            data.status === 'Done' ? 'text-green-600' :
+            data.status === 'Running' ? 'text-blue-600' :
+            data.status === 'Error' ? 'text-red-600' : ''
+          }>{data.status}</strong></span>
           <span>Duration: {data.duration}</span>
         </div>
-        
+
         {/* Progress Bar */}
         <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-          <div 
-            className={`h-full ${data.status === 'Done' ? 'bg-green-500' : 'bg-blue-500 transition-all duration-1000'}`} 
-            style={{ width: `${data.progress}%` }} 
+          <div
+            className={`h-full ${
+              data.status === 'Done' ? 'bg-green-500' :
+              data.status === 'Error' ? 'bg-red-500' :
+              'bg-blue-500 transition-all duration-1000'
+            }`}
+            style={{ width: `${data.progress}%` }}
           />
         </div>
 
@@ -82,7 +95,7 @@ export function WorkflowBuilder({ nodes, edges, onNodesChange, onEdgesChange, se
         id: `dndnode_${Date.now()}`,
         type,
         position,
-        data: { label, status: 'Waiting', duration: '--', progress: 0 },
+        data: { label, status: 'Pending', duration: '--', progress: 0 },
       };
 
       setNodes((nds: any) => nds.concat(newNode));
